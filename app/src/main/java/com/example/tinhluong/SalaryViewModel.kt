@@ -8,6 +8,7 @@ import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -30,16 +31,18 @@ class SalaryViewModel(application: Application) : AndroidViewModel(application) 
     private val _currentDays = MutableStateFlow<List<WorkDay>>(emptyList())
     val currentDays: StateFlow<List<WorkDay>> = _currentDays
 
-    var hourlyWage = MutableStateFlow(sharedPreferences.getInt("hourlyWage", 35))
+    var hourlyWage = MutableStateFlow(sharedPreferences.getInt("hourlyWage", 30000))
     val appColor = MutableStateFlow(sharedPreferences.getLong("appColor", 0xFF6650A4))
 
     val showOvertime = MutableStateFlow(sharedPreferences.getBoolean("showOvertime", false))
     val showSalary = MutableStateFlow(sharedPreferences.getBoolean("showSalary", true))
 
-    // Trạng thái Báo thức
     val isReminderOn = MutableStateFlow(sharedPreferences.getBoolean("isReminderOn", false))
-    val reminderHour = MutableStateFlow(sharedPreferences.getInt("reminderHour", 20)) // Mặc định 20:00 (8h tối)
+    val reminderHour = MutableStateFlow(sharedPreferences.getInt("reminderHour", 20))
     val reminderMinute = MutableStateFlow(sharedPreferences.getInt("reminderMinute", 0))
+
+    // BIẾN MỚI: Quản lý luồng lắng nghe ngày công để chống đơ app
+    private var loadDaysJob: Job? = null
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -49,7 +52,7 @@ class SalaryViewModel(application: Application) : AndroidViewModel(application) 
                     dao.insertMonth(WorkMonth(monthName = currentMonthStr))
                 } else {
                     _months.value = monthList
-                    dao.getDaysForMonth(monthList.last().id).collectLatest { _currentDays.value = it }
+                    // Đã dời việc load ngày sang hàm riêng để dễ quản lý luồng
                 }
             }
         }
@@ -59,7 +62,7 @@ class SalaryViewModel(application: Application) : AndroidViewModel(application) 
     fun updateReminderTime(hour: Int, minute: Int) {
         reminderHour.value = hour; reminderMinute.value = minute
         sharedPreferences.edit().putInt("reminderHour", hour).putInt("reminderMinute", minute).apply()
-        if (isReminderOn.value) scheduleAlarm() // Cập nhật lại giờ nếu đang bật
+        if (isReminderOn.value) scheduleAlarm()
     }
 
     fun toggleReminder(isOn: Boolean) {
@@ -78,10 +81,8 @@ class SalaryViewModel(application: Application) : AndroidViewModel(application) 
             set(Calendar.HOUR_OF_DAY, reminderHour.value)
             set(Calendar.MINUTE, reminderMinute.value)
             set(Calendar.SECOND, 0)
-            if (before(Calendar.getInstance())) add(Calendar.DATE, 1) // Nếu giờ đã qua thì đặt sang ngày mai
+            if (before(Calendar.getInstance())) add(Calendar.DATE, 1)
         }
-
-        // Lặp lại mỗi ngày
         alarmManager.setRepeating(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, AlarmManager.INTERVAL_DAY, pendingIntent)
     }
 
@@ -92,24 +93,22 @@ class SalaryViewModel(application: Application) : AndroidViewModel(application) 
         alarmManager.cancel(pendingIntent)
     }
 
-    // --- XỬ LÝ SETTING KHÁC ---
+    // --- XỬ LÝ SETTING ---
     fun updateAppColor(colorValue: Long) { appColor.value = colorValue; sharedPreferences.edit().putLong("appColor", colorValue).apply() }
     fun resetTheme() { updateAppColor(0xFF6650A4) }
     fun toggleOvertime(show: Boolean) { showOvertime.value = show; sharedPreferences.edit().putBoolean("showOvertime", show).apply() }
     fun toggleSalary(show: Boolean) { showSalary.value = show; sharedPreferences.edit().putBoolean("showSalary", show).apply() }
+    fun updateHourlyWage(newWage: Int) { hourlyWage.value = newWage; sharedPreferences.edit().putInt("hourlyWage", newWage).apply() }
 
-    fun updateHourlyWage(newWage: Int) {
-        hourlyWage.value = newWage
-        sharedPreferences.edit().putInt("hourlyWage", newWage).apply()
-        viewModelScope.launch(Dispatchers.IO) {
-            _currentDays.value.forEach { day ->
-                val newTotal = ((day.hours + day.overtimeHours) * newWage).toInt()
-                dao.updateDay(day.copy(totalWage = newTotal))
-            }
+    // --- XỬ LÝ DỮ LIỆU ---
+
+    // ĐÃ FIX LỖI: Hủy luồng cũ trước khi tạo luồng mới, giúp không bao giờ bị trắng màn hình!
+    fun loadDaysForMonth(monthId: Int) {
+        loadDaysJob?.cancel()
+        loadDaysJob = viewModelScope.launch(Dispatchers.IO) {
+            dao.getDaysForMonth(monthId).collectLatest { _currentDays.value = it }
         }
     }
-
-    fun loadDaysForMonth(monthId: Int) { viewModelScope.launch(Dispatchers.IO) { dao.getDaysForMonth(monthId).collectLatest { _currentDays.value = it } } }
 
     fun generateNextMonthName(): String {
         var attempt = LocalDate.now()
@@ -160,7 +159,7 @@ class SalaryViewModel(application: Application) : AndroidViewModel(application) 
 
     fun formatMoney(baseAmount: Int): String {
         val formatter = NumberFormat.getInstance(Locale("vi", "VN"))
-        return "${formatter.format(baseAmount * 1000)} VND"
+        return "${formatter.format(baseAmount)} VND"
     }
 
     fun convertMillisToDateString(millis: Long): String {

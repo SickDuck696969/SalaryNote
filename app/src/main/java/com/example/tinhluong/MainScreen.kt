@@ -64,7 +64,6 @@ fun MainScreen(viewModel: SalaryViewModel) {
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
 
-    // --- TỐI ƯU HOÁ STARTUP: Lưu toán học vào cache thay vì tính lại liên tục ---
     val totalWage = remember(currentDays) { currentDays.sumOf { it.totalWage } }
     val totalHours = remember(currentDays) { currentDays.sumOf { it.hours } }
     val totalOvertime = remember(currentDays) { currentDays.sumOf { it.overtimeHours } }
@@ -91,7 +90,6 @@ fun MainScreen(viewModel: SalaryViewModel) {
     var isDeleteMode by remember { mutableStateOf(false) }
     var selectedForDelete by remember { mutableStateOf(setOf<WorkDay>()) }
 
-    // Launcher xin quyền gửi thông báo (Cho Android 13+)
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
         if (!isGranted) Toast.makeText(context, "Vui lòng cấp quyền thông báo để app có thể nhắc nhở bạn!", Toast.LENGTH_LONG).show()
     }
@@ -198,6 +196,32 @@ fun MainScreen(viewModel: SalaryViewModel) {
     }
 }
 
+// KHỐI COMPONENT CHỌN CA ĐÃ ĐƯỢC ÉP MÀU HIGHLIGHT ĐẬM
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ShiftSelector(selectedShift: String, onShiftSelected: (String) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+        FilterChip(
+            selected = selectedShift == "Ca ngày",
+            onClick = { onShiftSelected("Ca ngày") },
+            label = { Text("Ca ngày", fontSize = 16.sp) },
+            colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                selectedLabelColor = MaterialTheme.colorScheme.onPrimary // Ép màu chữ trắng khi được chọn
+            )
+        )
+        FilterChip(
+            selected = selectedShift == "Ca đêm",
+            onClick = { onShiftSelected("Ca đêm") },
+            label = { Text("Ca đêm", fontSize = 16.sp) },
+            colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+            )
+        )
+    }
+}
+
 @Composable
 fun TableVerticalDivider() { Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(Color.Gray)) }
 
@@ -250,7 +274,14 @@ fun WorkDayRow(index: Int, day: WorkDay, viewModel: SalaryViewModel, formatMoney
     if (showDatePicker) { val datePickerState = rememberDatePickerState(); DatePickerDialog(onDismissRequest = { showDatePicker = false }, confirmButton = { TextButton(onClick = { datePickerState.selectedDateMillis?.let { millis -> viewModel.updateDay(day, newDateStr = viewModel.convertMillisToDateString(millis)) }; showDatePicker = false }) { Text("Chọn") } }, dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Huỷ") } }) { DatePicker(state = datePickerState, title = { Text("CHỌN NGÀY", modifier = Modifier.padding(start = 24.dp, top = 24.dp), fontWeight = FontWeight.Bold) }, headline = { Text(datePickerState.selectedDateMillis?.let { viewModel.convertMillisToDateString(it) } ?: "Chưa chọn", modifier = Modifier.padding(start = 24.dp, bottom = 12.dp), fontSize = 24.sp) }, showModeToggle = false) } }
     if (showHoursEdit) { var tempHours by remember { mutableStateOf(day.hours.toString()) }; AlertDialog(onDismissRequest = { showHoursEdit = false }, title = { Text("Sửa số giờ") }, text = { OutlinedTextField(value = tempHours, onValueChange = { tempHours = it }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)) }, confirmButton = { Button(onClick = { viewModel.updateDay(day, newHours = tempHours.toDoubleOrNull() ?: day.hours); showHoursEdit = false }) { Text("Lưu") } }) }
     if (showOvertimeEdit) { var tempOt by remember { mutableStateOf(day.overtimeHours.toString()) }; AlertDialog(onDismissRequest = { showOvertimeEdit = false }, title = { Text("Sửa giờ tăng ca") }, text = { OutlinedTextField(value = tempOt, onValueChange = { tempOt = it }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)) }, confirmButton = { Button(onClick = { viewModel.updateDay(day, newOvertime = tempOt.toDoubleOrNull() ?: day.overtimeHours); showOvertimeEdit = false }) { Text("Lưu") } }) }
-    if (showShiftEdit) { var tempShift by remember { mutableStateOf(day.shiftType) }; AlertDialog(onDismissRequest = { showShiftEdit = false }, title = { Text("Đổi loại ca") }, text = { Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { FilterChip(selected = tempShift == "Ca ngày", onClick = { tempShift = "Ca ngày" }, label = { Text("Ca ngày", fontSize = 16.sp) }); FilterChip(selected = tempShift == "Ca đêm", onClick = { tempShift = "Ca đêm" }, label = { Text("Ca đêm", fontSize = 16.sp) }) } }, confirmButton = { Button(onClick = { viewModel.updateDay(day, newShift = tempShift); showShiftEdit = false }) { Text("Lưu") } }) }
+    if (showShiftEdit) {
+        var tempShift by remember { mutableStateOf(day.shiftType) }
+        AlertDialog(
+            onDismissRequest = { showShiftEdit = false }, title = { Text("Đổi loại ca") },
+            text = { ShiftSelector(tempShift) { tempShift = it } },
+            confirmButton = { Button(onClick = { viewModel.updateDay(day, newShift = tempShift); showShiftEdit = false }) { Text("Lưu") } }
+        )
+    }
 }
 
 @Composable
@@ -274,7 +305,12 @@ fun MonthlySummaryDialog(monthName: String, totalDays: Int, dayShifts: Int, nigh
     if (showOvertime) copyContent += "\nTổng tăng ca: $totalOvertime giờ"
     if (showSalary) copyContent += "\nTỔNG LƯƠNG: ${formatMoney(totalWage)}"
 
-    AlertDialog(onDismissRequest = onDismiss, title = { Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("TỔNG KẾT", fontSize = 22.sp, fontWeight = FontWeight.Bold); TextButton(onClick = { onCopy(copyContent) }) { Text("📋 Copy", fontSize = 16.sp) } } }, text = { Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Tháng: $monthName", fontSize = 18.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.height(12.dp)); Text("Số ngày làm: $totalDays ngày", fontSize = 18.sp); Text("• Ca ngày: $dayShifts", fontSize = 16.sp, modifier = Modifier.padding(start = 12.dp, top = 4.dp)); Text("• Ca đêm: $nightShifts", fontSize = 16.sp, modifier = Modifier.padding(start = 12.dp, bottom = 8.dp)); Text("Tổng số giờ: $totalHours giờ", fontSize = 18.sp); if (showOvertime) { Text("Tổng tăng ca: $totalOvertime giờ", fontSize = 18.sp) }; if (showSalary) { Spacer(modifier = Modifier.height(16.dp)); Text("Tổng lương tháng:", fontSize = 18.sp); Text(formatMoney(totalWage), fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Color.Red); }; Spacer(modifier = Modifier.height(16.dp)); Text("Bạn có muốn chốt sổ và tạo bảng cho tháng mới không?", fontStyle = FontStyle.Italic, fontSize = 14.sp) } }, confirmButton = { Button(onClick = onConfirm) { Text("Xác nhận tạo", fontSize = 16.sp) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Đóng", fontSize = 16.sp) } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("TỔNG KẾT", fontSize = 22.sp, fontWeight = FontWeight.Bold); TextButton(onClick = { onCopy(copyContent) }) { Text("📋 Copy", fontSize = 16.sp) } } }, text = { Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Text("Tháng: $monthName", fontSize = 18.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.height(12.dp)); Text("Số ngày làm: $totalDays ngày", fontSize = 18.sp); Text("• Ca ngày: $dayShifts", fontSize = 16.sp, modifier = Modifier.padding(start = 12.dp, top = 4.dp)); Text("• Ca đêm: $nightShifts", fontSize = 16.sp, modifier = Modifier.padding(start = 12.dp, bottom = 8.dp)); Text("Tổng số giờ: $totalHours giờ", fontSize = 18.sp);
+        if (showOvertime) { Text("Tổng tăng ca: $totalOvertime giờ", fontSize = 18.sp) }
+        if (showSalary) { Spacer(modifier = Modifier.height(16.dp)); Text("Tổng lương tháng:", fontSize = 18.sp); Text(formatMoney(totalWage), fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Color.Red); }
+        Spacer(modifier = Modifier.height(16.dp)); Text("Bạn có muốn chốt sổ và tạo bảng cho tháng mới không?", fontStyle = FontStyle.Italic, fontSize = 14.sp)
+    } }, confirmButton = { Button(onClick = onConfirm) { Text("Xác nhận tạo", fontSize = 16.sp) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Đóng", fontSize = 16.sp) } })
 }
 
 @Composable
@@ -293,7 +329,9 @@ fun MonthGridDialog(months: List<WorkMonth>, mode: String, onDismiss: () -> Unit
 @Composable
 fun AddMultiDaysDialog(viewModel: SalaryViewModel, showOvertime: Boolean, onDismiss: () -> Unit, onConfirm: (Long, Long, String, Double, Double) -> Unit) {
     var startMillis by remember { mutableStateOf<Long?>(null) }; var endMillis by remember { mutableStateOf<Long?>(null) }; var selectedShift by remember { mutableStateOf("Ca ngày") }; var hours by remember { mutableStateOf("") }; var overtime by remember { mutableStateOf("") }; var showStartDatePicker by remember { mutableStateOf(false) }; var showEndDatePicker by remember { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Ghi công nhiều ngày", fontSize = 20.sp, fontWeight = FontWeight.Bold) }, text = { Column { OutlinedButton(onClick = { showStartDatePicker = true }, modifier = Modifier.fillMaxWidth()) { Text(if (startMillis == null) "Chọn Từ Ngày" else "Từ: ${viewModel.convertMillisToDateString(startMillis!!)}") }; OutlinedButton(onClick = { showEndDatePicker = true }, modifier = Modifier.fillMaxWidth()) { Text(if (endMillis == null) "Chọn Đến Ngày" else "Đến: ${viewModel.convertMillisToDateString(endMillis!!)}") }; Spacer(modifier = Modifier.height(8.dp)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { FilterChip(selected = selectedShift == "Ca ngày", onClick = { selectedShift = "Ca ngày" }, label = { Text("Ca ngày", fontSize = 16.sp) }); FilterChip(selected = selectedShift == "Ca đêm", onClick = { selectedShift = "Ca đêm" }, label = { Text("Ca đêm", fontSize = 16.sp) }) }; Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = hours, onValueChange = { hours = it }, label = { Text("Số giờ làm chung") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()); if (showOvertime) { Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = overtime, onValueChange = { overtime = it }, label = { Text("Số giờ tăng ca chung") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) } } }, confirmButton = { Button(onClick = { if (startMillis != null && endMillis != null) { val h = hours.toDoubleOrNull() ?: 0.0; val ot = overtime.toDoubleOrNull() ?: 0.0; onConfirm(startMillis!!, endMillis!!, selectedShift, h, ot) } }) { Text("Tạo", fontSize = 18.sp) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Huỷ", fontSize = 18.sp) } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Ghi công nhiều ngày", fontSize = 20.sp, fontWeight = FontWeight.Bold) }, text = { Column { OutlinedButton(onClick = { showStartDatePicker = true }, modifier = Modifier.fillMaxWidth()) { Text(if (startMillis == null) "Chọn Từ Ngày" else "Từ: ${viewModel.convertMillisToDateString(startMillis!!)}") }; OutlinedButton(onClick = { showEndDatePicker = true }, modifier = Modifier.fillMaxWidth()) { Text(if (endMillis == null) "Chọn Đến Ngày" else "Đến: ${viewModel.convertMillisToDateString(endMillis!!)}") }; Spacer(modifier = Modifier.height(8.dp));
+        ShiftSelector(selectedShift) { selectedShift = it }
+        Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = hours, onValueChange = { hours = it }, label = { Text("Số giờ làm chung") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()); if (showOvertime) { Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = overtime, onValueChange = { overtime = it }, label = { Text("Số giờ tăng ca chung") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) } } }, confirmButton = { Button(onClick = { if (startMillis != null && endMillis != null) { val h = hours.toDoubleOrNull() ?: 0.0; val ot = overtime.toDoubleOrNull() ?: 0.0; onConfirm(startMillis!!, endMillis!!, selectedShift, h, ot) } }) { Text("Tạo", fontSize = 18.sp) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Huỷ", fontSize = 18.sp) } })
     if (showStartDatePicker) { val datePickerState = rememberDatePickerState(); DatePickerDialog(onDismissRequest = { showStartDatePicker = false }, confirmButton = { TextButton(onClick = { startMillis = datePickerState.selectedDateMillis; showStartDatePicker = false }) { Text("Chọn") } }) { DatePicker(state = datePickerState, title = { Text("TỪ NGÀY", modifier = Modifier.padding(24.dp), fontWeight = FontWeight.Bold) }, headline = { Text(datePickerState.selectedDateMillis?.let { viewModel.convertMillisToDateString(it) } ?: "Chưa chọn", modifier = Modifier.padding(start = 24.dp, bottom = 12.dp), fontSize = 20.sp) }, showModeToggle = false) } }
     if (showEndDatePicker) { val datePickerState = rememberDatePickerState(); DatePickerDialog(onDismissRequest = { showEndDatePicker = false }, confirmButton = { TextButton(onClick = { endMillis = datePickerState.selectedDateMillis; showEndDatePicker = false }) { Text("Chọn") } }) { DatePicker(state = datePickerState, title = { Text("ĐẾN NGÀY", modifier = Modifier.padding(24.dp), fontWeight = FontWeight.Bold) }, headline = { Text(datePickerState.selectedDateMillis?.let { viewModel.convertMillisToDateString(it) } ?: "Chưa chọn", modifier = Modifier.padding(start = 24.dp, bottom = 12.dp), fontSize = 20.sp) }, showModeToggle = false) } }
 }
@@ -302,7 +340,9 @@ fun AddMultiDaysDialog(viewModel: SalaryViewModel, showOvertime: Boolean, onDism
 @Composable
 fun AddSingleDayDialog(showOvertime: Boolean, onDismiss: () -> Unit, onConfirm: (String, Double, Double) -> Unit) {
     var selectedShift by remember { mutableStateOf("Ca ngày") }; var hours by remember { mutableStateOf("") }; var overtime by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Ghi công 1 ngày", fontSize = 20.sp, fontWeight = FontWeight.Bold) }, text = { Column { Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { FilterChip(selected = selectedShift == "Ca ngày", onClick = { selectedShift = "Ca ngày" }, label = { Text("Ca ngày", fontSize = 16.sp) }); FilterChip(selected = selectedShift == "Ca đêm", onClick = { selectedShift = "Ca đêm" }, label = { Text("Ca đêm", fontSize = 16.sp) }) }; Spacer(modifier = Modifier.height(12.dp)); OutlinedTextField(value = hours, onValueChange = { hours = it }, label = { Text("Số giờ làm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()); if (showOvertime) { Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = overtime, onValueChange = { overtime = it }, label = { Text("Giờ tăng ca") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) } } }, confirmButton = { Button(onClick = { val h = hours.toDoubleOrNull() ?: 0.0; val ot = overtime.toDoubleOrNull() ?: 0.0; onConfirm(selectedShift, h, ot) }) { Text("Lưu", fontSize = 18.sp) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Huỷ", fontSize = 18.sp) } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Ghi công 1 ngày", fontSize = 20.sp, fontWeight = FontWeight.Bold) }, text = { Column {
+        ShiftSelector(selectedShift) { selectedShift = it }
+        Spacer(modifier = Modifier.height(12.dp)); OutlinedTextField(value = hours, onValueChange = { hours = it }, label = { Text("Số giờ làm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()); if (showOvertime) { Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = overtime, onValueChange = { overtime = it }, label = { Text("Giờ tăng ca") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) } } }, confirmButton = { Button(onClick = { val h = hours.toDoubleOrNull() ?: 0.0; val ot = overtime.toDoubleOrNull() ?: 0.0; onConfirm(selectedShift, h, ot) }) { Text("Lưu", fontSize = 18.sp) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Huỷ", fontSize = 18.sp) } })
 }
 
 @Composable
@@ -320,12 +360,11 @@ fun SettingsDialog(
         onDismissRequest = onDismiss, title = { Text("Cài đặt", fontSize = 20.sp, fontWeight = FontWeight.Bold) },
         text = {
             Column {
-                if (showSalary) { OutlinedTextField(value = wageStr, onValueChange = { wageStr = it }, label = { Text("Tiền lương 1 giờ (VD: 35)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()); Spacer(modifier = Modifier.height(16.dp)) }
+                if (showSalary) { OutlinedTextField(value = wageStr, onValueChange = { wageStr = it }, label = { Text("Tiền lương 1 giờ (VD: 30000)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()); Spacer(modifier = Modifier.height(16.dp)) }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Hiện cột Tăng ca:", fontSize = 16.sp); Switch(checked = showOvertime, onCheckedChange = onToggleOvertime) }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Tính Tiền lương:", fontSize = 16.sp); Switch(checked = showSalary, onCheckedChange = onToggleSalary) }
 
-                // MỤC NHẮC NHỞ MỚI THÊM
                 Divider(modifier = Modifier.padding(vertical = 8.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Nhắc nhở hằng ngày:", fontSize = 16.sp, fontWeight = FontWeight.Bold); Switch(checked = isReminderOn, onCheckedChange = onToggleReminder) }
                 if (isReminderOn) { OutlinedButton(onClick = onPickTime, modifier = Modifier.fillMaxWidth()) { Text("Giờ nhắc: $timeString", fontSize = 16.sp) } }
